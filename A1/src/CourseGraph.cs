@@ -310,9 +310,9 @@ namespace CourseGraph {
       }
 
       foreach (var v in this.Vertices) {
-        string toId = "n" + v.Value.ID;
+        string fromId = "n" + v.Value.ID;
         foreach (var e in v.Edges) {
-          string fromId = "n" + e.AdjVertex.Value.ID;
+          string toId = "n" + e.AdjVertex.Value.ID;
           if (e.Relation == CourseRelation.Prereq)
             sb.AppendLine($"  {fromId} -->|Prereq| {toId}");
           else
