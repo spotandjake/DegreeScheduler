@@ -1,20 +1,18 @@
 using CourseGraph;
 using System.Collections.Generic;
+using System;
 
 CourseGraph.CourseGraph graph = new CourseGraph.CourseGraph();
 
-// add phantom root node for the degree
-Course degree = new Course(0, "Computer Science", new List<Course>(), new List<Course>(), true);
-graph.AddVertex(degree);
 
 // Year 1
-Course cois1010 = new Course(1010, "COIS-1010H: The Digital World", new List<Course>(), new List<Course> { degree });
+Course cois1010 = new Course(1010, "COIS-1010H: The Digital World", new List<Course>(), new List<Course>());
 Course cois1020 = new Course(1020, "COIS-1020H: Programming for Computing Systems", new List<Course> { cois1010 }, new List<Course> { cois1010 });
 Course cois1400 = new Course(1400, "COIS-1400H: Introduction to Data Science", new List<Course> { cois1020 }, new List<Course> { cois1020 });
 Course cois1620 = new Course(1620, "COIS-1620H: Introduction to Information Systems", new List<Course>(), new List<Course> { cois1010 });
-Course math1350 = new Course(1350, "MATH-1350H: Linear Algebra I", new List<Course>(), new List<Course> { degree });
-Course math1550 = new Course(1550, "MATH-1550H: Probability I", new List<Course>(), new List<Course> { degree });
-Course math1110 = new Course(1110, "MATH-1110H: Calculus I", new List<Course>(), new List<Course> { degree });
+Course math1350 = new Course(1350, "MATH-1350H: Linear Algebra I", new List<Course>(), new List<Course>());
+Course math1550 = new Course(1550, "MATH-1550H: Probability I", new List<Course>(), new List<Course>());
+Course math1110 = new Course(1110, "MATH-1110H: Calculus I", new List<Course>(), new List<Course>());
 graph.AddVertex(cois1010);
 graph.AddVertex(cois1020);
 graph.AddVertex(cois1400);
@@ -72,7 +70,7 @@ graph.AddVertex(cois4450);
 graph.AddVertex(cois4550);
 
 // Random courses
-Course scifi = new Course(1000, "SCIFI-1000H: Science Fiction", new List<Course>(), new List<Course>());
+Course scifi = new Course(1000, "SCIFI-1000H: Science Fiction", new List<Course>(), new List<Course>(), true);
 Course scifi2 = new Course(1001, "SCIFI-1001H: Science Fiction 2", new List<Course>(), new List<Course> { scifi });
 Course scifi3 = new Course(1002, "SCIFI-1002H: Science Fiction 3", new List<Course>(), new List<Course> { scifi2 });
 graph.AddVertex(scifi);
@@ -94,5 +92,15 @@ Course unrelated3 = new Course(1009, "UNRELATED-1005H: Unrelated 3", new List<Co
 graph.AddVertex(unrelated);
 graph.AddVertex(unrelated2);
 graph.AddVertex(unrelated3);
+
+List<Course> allRequiredCourses = new List<Course> {
+  cois1010, math1350, math1110, math1110, cois2020, cois2240, math2600, cois4000, cois4550
+};
+// add phantom root node for the degree
+Course degree = new Course(0, "Computer Science", new List<Course>(), allRequiredCourses, true);
+graph.AddVertex(degree);
+
+// print out the t_min and t_global_max per vertex
+graph.Schedule(5, 2, degree);
 
 graph.WriteToFile("coursegraph.md");
