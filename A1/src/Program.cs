@@ -1,12 +1,25 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Diagnostics;
 using CourseGraph;
 
 // Load Data
 var jsonString = File.ReadAllText("./courseData.json");
 var loadedCourseData = JsonSerializer.Deserialize<CourseData>(jsonString);
 var courseGraph = CourseGraph.CourseGraph.FromCourseData(loadedCourseData);
+// Test Scheduling
+var coisDegree = loadedCourseData.GetDegreeByName("COIS");
+var sw = Stopwatch.StartNew();
+var schedule = courseGraph.Schedule(termSize: 5, creditCount: Math.Min(40, loadedCourseData.Courses.Count), degreeCourse: coisDegree);
+sw.Stop();
+schedule.PrintSchedule();
+foreach (var msg in courseGraph.MissedOpportunities) {
+  Console.WriteLine(msg);
+}
+Console.WriteLine($"Failed Placements: {courseGraph.MissedOpportunities.Count}");
+Console.WriteLine($"Elapsed time: {sw.Elapsed.TotalMilliseconds} ms");
+schedule.WriteScheduleToFile("./schedule.md");
 // Write outputs
 var outputCourseData = courseGraph.GetCourseData();
 File.WriteAllText(
