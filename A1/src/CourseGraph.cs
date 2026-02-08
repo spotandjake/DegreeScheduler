@@ -97,10 +97,8 @@ namespace CourseGraph {
     /// </summary>
     public List<CourseEdge> Edges { get; set; }     // List of adjacency vertices
 
-    /// <summary>Minimum term this course can be taken in.</summary>
-    public int TermMin { get; set; }
-    /// <summary>Maximum term this course can be taken in (based on the degree).</summary>
-    public int TermMax { get; set; }
+    /// <summary>Cost heuristic for scheduling.</summary>
+    public double Cost { get; set; }
 
     /// <summary>
     /// Initializes a new instance of the CourseVertex class with the specified course value.
@@ -110,8 +108,6 @@ namespace CourseGraph {
       this.Value = value;
       this.Visited = false;
       this.Edges = new List<CourseEdge>();
-      this.TermMin = 0;
-      this.TermMax = 0;
     }
 
 
@@ -145,6 +141,17 @@ namespace CourseGraph {
       this.Vertices = new List<CourseVertex>();
       this.MissedOpportunities = new List<string>();
     }
+
+    /// <summary>
+    /// The cost of a corequisite when doing the cost heuristic is set to this
+    /// as we still want the scheduler to schedule courses who have corequisites
+    /// before courses with the same number of pre-requisites but no corequisites.
+    /// </summary>
+    private static readonly double CoreqWeight = 0.05;
+    /// <summary>
+    /// The weight of a pre-requisite when doing the cost heuristic.
+    /// </summary>
+    private static readonly double PrereqWeight = 1.0;
 
     /// <summary>
     /// Worst case time complexity: O(v)
@@ -351,9 +358,7 @@ namespace CourseGraph {
       // Find all root vertices (vertices with no incoming edges)
       List<CourseVertex> roots = new List<CourseVertex>(this.Vertices);
       foreach (var vert in this.Vertices) {
-        // Clear T_min, T_max, and visited (we are going to recompute them)
-        vert.TermMin = 0;
-        vert.TermMax = 0;
+        vert.Cost = 0;
         vert.Visited = false;
         foreach (var edge in vert.Edges) {
           // If the root has an incoming edge, it isn't a root
@@ -370,41 +375,33 @@ namespace CourseGraph {
         roots.Remove(degreeVertex);
         roots.Add(degreeVertex);
       }
-      // Compute TermMin and TermMax for each root
-      foreach (var root in roots) {
-        this.ComputeTermBoundsForDegree(root, creditCount, root == degreeVertex);
-      }
 
-      // Reset visited
-      foreach (var vert in this.Vertices) {
-        vert.Visited = false;
-      }
+      this.ComputeCostHeuristic(degreeVertex);
 
       // -------------- Greedy Schedule --------------
       var schedule = new Schedule.Schedule(degree: degreeCourse, maxTermSize: termSize);
-      // The highest priority placement is going to be the course with the highest T_max,
-      // as this course has the longest pre-requisite chain (and likely defines how many terms).
+      // Order by cost heuristic (ascending so stack pops highest cost / deepest first).
       // First we schedule the required courses
-      var coursesToPlace = new Stack<CourseVertex>(degreeVertex.Edges.Select(e => e.AdjVertex).OrderBy(c => c.TermMax));
+      var coursesToPlace = new Stack<CourseVertex>(degreeVertex.Edges.Select(e => e.AdjVertex).OrderBy(c => c.Cost));
       while (coursesToPlace.Count > 0) {
         var courseToPlace = coursesToPlace.Pop();
         if (courseToPlace.Visited) continue; // We've already placed this course
         foreach (var course in this.TopologicalSort(courseToPlace)) {
-          this.PlaceInScheduleData(schedule, course);
+          this.PlaceInScheduleData(schedule, course, creditCount);
         }
         if (!courseToPlace.Visited)
           throw new Exception("Impossible: Failed to place required course");
       }
 
       // Begin placing filler courses (Non required courses used to hit creditCount)
-      var fillerCourses = new Stack<CourseVertex>(this.Vertices.Where(v => !v.Visited && !v.Value.IsDegree).OrderBy(v => v.TermMax));
+      var fillerCourses = new Stack<CourseVertex>(this.Vertices.Where(v => !v.Visited && !v.Value.IsDegree).OrderBy(v => v.Cost));
       while (fillerCourses.Count > 0 && schedule.CourseCount < creditCount) {
         var fillerCourse = fillerCourses.Pop();
         if (fillerCourse.Visited) continue; // We've already placed this course
         // NOTE: This isn't giving us optimal yet due to co-req spacing and such
         try {
           foreach (var course in this.TopologicalSort(fillerCourse)) {
-            this.PlaceInScheduleData(schedule, course);
+            this.PlaceInScheduleData(schedule, course, creditCount);
           }
         }
         catch {
@@ -422,7 +419,8 @@ namespace CourseGraph {
 
     private void PlaceInScheduleData(
       Schedule.Schedule schedule,
-      CourseVertex courseVertex
+      CourseVertex courseVertex,
+      int creditCount
     ) {
       // The course was already placed
       if (courseVertex.Visited) return;
@@ -435,12 +433,15 @@ namespace CourseGraph {
       var minPrereq = courseVertex.Edges
                       .Where(e => e.Relation == CourseRelation.Prereq)
                       .Select(e => schedule.GetCourseTerm(e.AdjVertex.Value))
-                      .DefaultIfEmpty(0)
+                      .DefaultIfEmpty(-1)
                       .Max() + 1;
-      var courseMinimumTerm = Math.Max(minCoreq, minPrereq) - 1;
+      var courseMinimumTerm = Math.Max(minCoreq, minPrereq);
+
       // Place the actual course
       Course course = courseVertex.Value;
-      for (int i = courseMinimumTerm; i < courseVertex.TermMax; i++) {
+      // We will never actually end up looping this many times unless all courses are on a 
+      // tuesday at 2pm in the fall (or rather just worst case scenario).
+      for (int i = courseMinimumTerm; i < Enum.GetValues(typeof(Term)).Length * creditCount; i++) {
         if (schedule.IsTermFull(i)) continue; // Can't place in a full term.
         var termType = schedule.GetTermType(i);
         var possibleTimeSlots = course.TimeTableInfos.Where(slot => slot.OfferedTerm == termType);
@@ -496,65 +497,21 @@ namespace CourseGraph {
     }
 
     /// <summary>
-    /// DFS to compute TermMin and TermMax for courses of a given root.
+    /// Cost = longest path from root
+    /// Time complexity O(V+E)
     /// </summary>
-    /// <param name="root">The course to start from</param>
-    /// <param name="creditCount">Total number of credits required</param>
-    /// <param name="isDegreeCourse">Whether this root is a degree course</param>
-    private void ComputeTermBoundsForDegree(CourseVertex root, int creditCount, bool isDegreeCourse) {
-      // TODO: Determine if there is a simpler / faster way we can compute `T_max`
-      // Stack stores: (vertex, depth, isReturning (returning from children))
-      var stack = new Stack<(CourseVertex vertex, int depth, bool isReturning)>();
-      // TODO: Heavily test this
-      // TODO: better documentation on this
-      stack.Push((root, 0, false));
+    /// <param name="degreeVertex">The phantom vertex for the degree (root).</param>
+    private void ComputeCostHeuristic(CourseVertex degreeVertex) {
+      foreach (var vertex in this.Vertices) vertex.Cost = 0;
+      degreeVertex.Cost = 0;
 
-      while (stack.Count > 0) {
-        var (vertex, depth, isReturning) = stack.Pop();
-
-        if (isReturning) {
-          if (!vertex.Value.IsDegree) {
-            int earliestTerm = 1;
-            foreach (var edge in vertex.Edges) {
-              if (edge.Relation == CourseRelation.Prereq) {
-                // Prerequisites must be completed before this course
-                earliestTerm = Math.Max(earliestTerm, edge.AdjVertex.TermMin + 1);
-              } else {
-                // Corequisites can be taken at the same time
-                earliestTerm = Math.Max(earliestTerm, edge.AdjVertex.TermMin);
-              }
-            }
-            vertex.TermMin = Math.Max(vertex.TermMin, earliestTerm);
-          }
-
-          if (!vertex.Value.IsDegree) {
-            // If every course happens on a tuesday at 2pm in the fall we would need a separate term per credit
-            int newTMax = Enum.GetValues(typeof(Term)).Length * creditCount - depth;
-
-            // Update TermMax
-            if (isDegreeCourse || vertex.TermMax == 0) {
-              vertex.TermMax = newTMax;
-            } else {
-              vertex.TermMax = Math.Max(vertex.TermMax, newTMax);
-            }
-          }
-
-          continue;
-        }
-
-        if (vertex.Visited) continue;
-
-        vertex.Visited = true;
-        stack.Push((vertex, depth, true));
-
-        // Push children onto stack
+      var order = this.TopologicalSort(degreeVertex).ToList();
+      foreach (var vertex in order) {
         foreach (var edge in vertex.Edges) {
-          if (!edge.AdjVertex.Visited) {
-            // For corequisites, don't increase depth
-            var nextDepth = depth;
-            if (edge.Relation == CourseRelation.Prereq) nextDepth++;
-            stack.Push((edge.AdjVertex, nextDepth, false));
-          }
+          var prereqVertex = edge.AdjVertex;
+          double weight = edge.Relation == CourseRelation.Prereq ? CourseGraph.PrereqWeight : CourseGraph.CoreqWeight;
+          double newCost = prereqVertex.Cost + weight;
+          if (newCost > vertex.Cost) vertex.Cost = newCost;
         }
       }
     }
