@@ -2,7 +2,10 @@
 
 As we did our testing using a proper test framework we don't have a traditional pdf to submit.
 
-A report that our tests pass can be found here: 
+A report that our tests pass can be found here: https://github.com/Kara-Zor-El/COIS-3020/actions/runs/21842017524/job/63028527476
+
+![CI RUN](./images/ci.png)
+
 
 
 Our tests for PartA can be found in `./A1Tests/PartA.cs` the expected outputs are defined by the `Assert` functions.
