@@ -6,10 +6,6 @@ using System.Collections.Generic;
 using System.IO;
 
 namespace Schedule {
-  public record struct TimeTableResult(
-    List<(Course course, TimeTableInfo section)?[]> TimeTables,
-    (Course course, TimeTableInfo[] courseSections)?[] SlotData
-  );
 
   public class Schedule {
     /// <summary>The time increment used between blocks when rendering schedules.</summary>
@@ -56,10 +52,10 @@ namespace Schedule {
         break;
       }
       // Narrow timeSlots to valid combinations
-      var (permutations, narrowedTermData) = this.GetValidTimeTables(newTermData);
-      if (permutations.Count <= 0)
+      var validTimeTable = this.GetValidTimeTables(newTermData);
+      if (validTimeTable == null)
         throw new Exception("Impossible: No valid timeSlot after validation");
-      this.TermData[term] = narrowedTermData;
+      this.TermData[term] = newTermData;
       this.ScheduledCourses.Add(course.Name, term);
     }
 
@@ -71,7 +67,7 @@ namespace Schedule {
     /// </summary>
     /// <param name="slotData">Per-slot (course, possible sections); null = empty slot.</param>
     /// <returns>TimeTableResult (TimeTables, slotData). Empty grid if no valid permutation.</returns>
-    public TimeTableResult GetValidTimeTables((Course course, TimeTableInfo[] courseSections)?[] slotData) {
+    private (Course course, TimeTableInfo section)?[]? GetValidTimeTables((Course course, TimeTableInfo[] courseSections)?[] slotData) {
       // This may seem naive and it is however as we narrow as we select which means 
       // we don't grow to large. This may become an issue with an insanely massive graph 
       // though even with something as large as trent's course system this works in a negligible amount of time.
@@ -82,7 +78,6 @@ namespace Schedule {
 
       // Generate all permutations
       // Each permutation is represented as a unique combination index from 0 to total-1
-      var allPermutations = new List<(Course course, TimeTableInfo section)?[]>();
       for (long combo = 0; combo < total; combo++) {
         // Convert the combination index into per-slot section choices
         // This works like converting a number to mixed-radix where each position has a different base
@@ -117,30 +112,10 @@ namespace Schedule {
           }
           if (!valid) break;
         }
-        if (valid) allPermutations.Add(candidate);
+        if (valid) return candidate;
       }
 
-      // If we have a lot of combinations we filter out any sections that don't fit into a valid timeslot, 
-      // this lets us reduce the problem size when we have large terms (it's expensive hence the heuristic)
-      if (total > 1024) {
-        // Filter out any sections from the slotData that are not used in a valid permutation
-        var narrowedSlotData = new (Course course, TimeTableInfo[] courseSections)?[slotData.Length];
-        for (int i = 0; i < slotData.Length; i++) {
-          var slot = slotData[i];
-          if (slot == null) continue;
-          var (course, _) = slot.Value;
-          var sectionsInValidPerms = allPermutations
-            .Select(p => p[i]) // Lookup the permutation from the slot
-            .Where(e => e.HasValue) // Ensure the permutation isn't null
-            .Select(e => e!.Value.section) // Get the section data
-            .Distinct() // Get only distinct items
-            .ToArray(); // Convert back to an array
-          narrowedSlotData[i] = (course, sectionsInValidPerms); // Write the data back
-        }
-        return new TimeTableResult(allPermutations, narrowedSlotData);
-      } else {
-        return new TimeTableResult(allPermutations, slotData);
-      }
+      return null;
     }
 
     /// <summary>
@@ -173,8 +148,8 @@ namespace Schedule {
         break;
       }
       // Narrow timeSlots to valid combinations
-      var (permutations, _) = this.GetValidTimeTables(newTermData);
-      if (permutations.Count < 1) return false;
+      var validTimeTable = this.GetValidTimeTables(newTermData);
+      if (validTimeTable == null) return false;
       // The course can fit in the given term
       return true;
     }
@@ -217,11 +192,11 @@ namespace Schedule {
         var termData = this.TermData[termIndex];
         var termNotEmpty = termData.Any(i => i != null);
         // Get TimeTable Information
-        var (timeTableInfo, _) = this.GetValidTimeTables(termData);
+        var timeTable = this.GetValidTimeTables(termData);
         // Because we use `getValidTimeTables` to check if we can place in term,
         // we should never have a case where the result is empty if we have things
         // scheduled in the term.
-        if (timeTableInfo.Count <= 0 && termNotEmpty) {
+        if (timeTable == null && termNotEmpty) {
           throw new Exception("Impossible: There are no valid timetables for a term");
         }
         // Build Term Table Header
@@ -239,8 +214,7 @@ namespace Schedule {
         ) {
           var row = new Markup?[header.Length];
           row[0] = new Markup(time.ToString("HH:mm")); // Set the first row the time
-          if (termNotEmpty) {
-            var timeTable = timeTableInfo[0];
+          if (termNotEmpty && timeTable != null) {
             for (int courseEntry = 0; courseEntry < timeTable.Length; courseEntry++) {
               // NOTE: We always choose the first permutation because it doesn't matter 
               //       This could be changed to get a more desirable course layout.
